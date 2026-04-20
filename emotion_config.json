@@ -1,0 +1,38 @@
+{
+  "thresholds": {
+    "excited": {
+      "excitement_score_min": 5,
+      "hedge_density_max": 3
+    },
+    "uncertain": {
+      "hedge_density_min": 8
+    },
+    "curious": {
+      "question_rate_min": 0.5
+    },
+    "engaged": {
+      "volunteering_score_min": 0.3
+    }
+  },
+  "hedge_words": [
+    "perhaps", "maybe", "might", "could", "possibly", "arguably",
+    "i think", "i believe", "it seems", "appears to", "likely",
+    "probably", "somewhat", "fairly", "rather", "sort of", "kind of",
+    "in a way", "to some extent", "i suppose", "i guess"
+  ],
+  "excitement_markers": [
+    "!", "...", "wow", "amazing", "incredible", "fantastic", "love",
+    "excited", "fascinating", "brilliant", "perfect", "exactly",
+    "absolutely", "definitely", "totally"
+  ],
+  "volunteering_phrases": [
+    "i could also", "another option", "you might also", "additionally",
+    "by the way", "also worth noting", "one more thing", "bonus:",
+    "fun fact", "interestingly", "while we're at it", "speaking of"
+  ],
+  "preamble_patterns": [
+    "^(okay|ok|alright|sure|right|so|well|let me|i'll|let's see|hmm)",
+    "^(great question|good question|interesting|that's a)",
+    "^(to answer|in response|regarding|as for|when it comes to)"
+  ]
+}

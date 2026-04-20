@@ -1,0 +1,12 @@
+[project]
+name = "voice"
+version = "0.2.0"
+description = "Voice I/O for Claude Desktop — faster-whisper STT with noise filtering and emotion detection, paired with edge-tts MCP wrapper"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "Joseph Wander" }]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
