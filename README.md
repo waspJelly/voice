@@ -112,7 +112,18 @@ min_speech_duration_secs = 3.0
 rms_threshold = 100
 noise_filter_enabled = true
 pre_record_enabled = true
+
+[emotion]
+enabled = true
 ```
+
+For debugging or future tuning work, emotion analysis can be disabled globally with:
+
+```bash
+export VOICE_EMOTION_ENABLED=false
+```
+
+The existing `skip_emotion=true` query parameter still disables emotion analysis per request.
 
 Config lookup order:
 1. `VOICE_CONFIG_PATH` environment variable
@@ -164,7 +175,7 @@ For Linux or local development, you can point your MCP client at the Python entr
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `VOICE_CONFIG_PATH` | Path to `voice.config.toml` | Auto-discovered |
-| `VOICE_FFMPEG_PATH` | Path to ffmpeg binary | Auto-discovered via PATH |
+| `VOICE_EMOTION_ENABLED` | Global on/off switch for audio emotion analysis | `true` |
 | `VOICE_EMOTION_LOG_DIR` | Directory for emotion analysis logs | `~/.voice/logs/` |
 
 ## License
