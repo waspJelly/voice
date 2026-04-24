@@ -93,8 +93,8 @@ python voice_server.py
 #   POST /listen?timeout=30   - Record + transcribe + emotion
 #        &skip_emotion=true   - Skip emotion detection
 #        &skip_filter=true    - Skip noise filtering
-#        &silence_timeout=4.0 - Silence cutoff seconds
-#        &min_speech_duration=3.0 - Min speech before checking silence
+#        &silence_timeout=1.5 - Silence cutoff seconds
+#        &min_speech_duration=1.0 - Min speech before checking silence
 #        &rms_threshold=100   - Loudness floor (20-500)
 ```
 
@@ -107,11 +107,17 @@ Create `voice.config.toml` in the repo directory (or set `VOICE_CONFIG_PATH` env
 
 ```toml
 [listen]
-silence_timeout_secs = 4.0
-min_speech_duration_secs = 3.0
+silence_timeout_secs = 1.5
+min_speech_duration_secs = 1.0
 rms_threshold = 100
 noise_filter_enabled = true
 pre_record_enabled = true
+
+[audio]
+beep_enabled = true
+
+[transcription]
+vad_enabled = true
 
 [emotion]
 enabled = true
@@ -124,6 +130,16 @@ export VOICE_EMOTION_ENABLED=false
 ```
 
 The existing `skip_emotion=true` query parameter still disables emotion analysis per request.
+
+Two more useful debug flags:
+
+```bash
+export VOICE_BEEP_ENABLED=false
+export VOICE_VAD_ENABLED=true
+```
+
+- `VOICE_BEEP_ENABLED=false` disables the triple-beep cue, which is useful when testing whether speaker bleed is contaminating transcription.
+- `VOICE_VAD_ENABLED` controls Whisper-side voice activity filtering during transcription.
 
 Config lookup order:
 1. `VOICE_CONFIG_PATH` environment variable
@@ -175,6 +191,8 @@ For Linux or local development, you can point your MCP client at the Python entr
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `VOICE_CONFIG_PATH` | Path to `voice.config.toml` | Auto-discovered |
+| `VOICE_BEEP_ENABLED` | Global on/off switch for the recording beep cue | `true` |
+| `VOICE_VAD_ENABLED` | Global on/off switch for Whisper-side VAD filtering | `true` |
 | `VOICE_EMOTION_ENABLED` | Global on/off switch for audio emotion analysis | `true` |
 | `VOICE_EMOTION_LOG_DIR` | Directory for emotion analysis logs | `~/.voice/logs/` |
 

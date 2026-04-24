@@ -50,3 +50,15 @@ Emotion classifier status:
    - listener background startup
 5. If manual validation still shows echo or device issues, add explicit device
    selection or playback isolation controls.
+
+## Latest Findings
+
+- Multi-turn MCP-client validation is complete and the MCP path is working.
+- Device and echo testing suggests the voice stack can produce clean output in
+  controlled conditions, but capture quality is still fragile.
+- The recent fix passes improved capture responsiveness and reduced some of the
+  worst transcript drift.
+- Making the recording beep disableable was worthwhile; beep-off testing
+  produced cleaner debugging conditions and likely reduced contamination risk.
+- The remaining highest-value problem is transcription robustness in live use,
+  not MCP transport or the existence of the Whisper wrapper itself.

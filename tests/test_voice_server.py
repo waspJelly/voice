@@ -48,8 +48,14 @@ class VoiceServerTests(unittest.TestCase):
             defaults = self.voice_server.get_listen_defaults()
 
         self.assertEqual(defaults["silence_timeout"], self.voice_server.DEFAULT_SILENCE_TIMEOUT)
+        self.assertTrue(defaults["beep_enabled"])
         self.assertTrue(defaults["noise_filter_enabled"])
+        self.assertTrue(defaults["vad_enabled"])
         self.assertTrue(defaults["emotion_enabled"])
+
+    def test_seconds_to_chunks_rounds_up(self) -> None:
+        self.assertEqual(self.voice_server._seconds_to_chunks(0.1), 1)
+        self.assertEqual(self.voice_server._seconds_to_chunks(0.21), 2)
 
     def test_env_flag_can_disable_emotion_globally(self) -> None:
         with mock.patch.dict(self.voice_server.os.environ, {"VOICE_EMOTION_ENABLED": "false"}, clear=False), mock.patch.object(
@@ -58,6 +64,31 @@ class VoiceServerTests(unittest.TestCase):
             defaults = self.voice_server.get_listen_defaults()
 
         self.assertFalse(defaults["emotion_enabled"])
+
+    def test_env_flags_can_disable_beep_and_vad_globally(self) -> None:
+        with mock.patch.dict(
+            self.voice_server.os.environ,
+            {"VOICE_BEEP_ENABLED": "false", "VOICE_VAD_ENABLED": "false"},
+            clear=False,
+        ), mock.patch.object(self.voice_server, "VOICE_CONFIG_PATH", None):
+            defaults = self.voice_server.get_listen_defaults()
+
+        self.assertFalse(defaults["beep_enabled"])
+        self.assertFalse(defaults["vad_enabled"])
+
+    def test_transcribe_audio_passes_vad_flag_to_model(self) -> None:
+        fake_segments = [types.SimpleNamespace(text="hello"), types.SimpleNamespace(text=" world")]
+        self.voice_server.model.transcribe = mock.Mock(return_value=(fake_segments, {}))
+
+        result = self.voice_server._transcribe_audio("/tmp/fake.wav", vad_enabled=True)
+
+        self.assertEqual(result, "hello  world")
+        self.voice_server.model.transcribe.assert_called_once_with(
+            "/tmp/fake.wav",
+            beam_size=5,
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": 200},
+        )
 
     def test_listen_endpoint_enables_emotion_by_default(self) -> None:
         dummy = types.SimpleNamespace(path="/listen?timeout=9")

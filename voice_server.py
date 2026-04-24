@@ -10,6 +10,7 @@ Features:
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
+import math
 import pyaudio
 import struct
 import traceback
@@ -27,15 +28,15 @@ from scipy.fft import fft
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════
 SAMPLE_RATE = 16000
-CHUNK_SIZE = 8000  # ~500ms chunks
+CHUNK_SIZE = 3200  # ~200ms chunks for more responsive silence detection
 BEEP_FREQ = 880
 BEEP_DURATION = 0.15
 BEEP_GAP = 0.08
 
 # Default listen params — overridden by voice.config.toml [listen] section and per-call params
-DEFAULT_SILENCE_TIMEOUT = 4.0
+DEFAULT_SILENCE_TIMEOUT = 1.5
 DEFAULT_RMS_THRESHOLD = 100
-DEFAULT_MIN_SPEECH_DURATION = 3.0
+DEFAULT_MIN_SPEECH_DURATION = 1.0
 
 END_PHRASES = [
     'send this', 'send it', 'done', "that's it", 'stop', 'exit',
@@ -54,6 +55,10 @@ def _env_flag(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _seconds_to_chunks(duration_secs: float) -> int:
+    return max(1, math.ceil(duration_secs * SAMPLE_RATE / CHUNK_SIZE))
 
 def _find_config():
     candidates = [
@@ -75,20 +80,26 @@ def get_listen_defaults():
             "min_speech_duration": DEFAULT_MIN_SPEECH_DURATION,
             "rms_threshold": DEFAULT_RMS_THRESHOLD,
             "pre_record_enabled": True,
+            "beep_enabled": _env_flag("VOICE_BEEP_ENABLED", True),
             "noise_filter_enabled": True,
+            "vad_enabled": _env_flag("VOICE_VAD_ENABLED", True),
             "emotion_enabled": _env_flag("VOICE_EMOTION_ENABLED", True),
         }
     try:
         with open(VOICE_CONFIG_PATH, "rb") as f:
             config = tomllib.load(f)
         listen = config.get("listen", {})
+        audio = config.get("audio", {})
+        transcription = config.get("transcription", {})
         emotion = config.get("emotion", {})
         return {
             "silence_timeout": listen.get("silence_timeout_secs", DEFAULT_SILENCE_TIMEOUT),
             "min_speech_duration": listen.get("min_speech_duration_secs", DEFAULT_MIN_SPEECH_DURATION),
             "rms_threshold": listen.get("rms_threshold", DEFAULT_RMS_THRESHOLD),
             "pre_record_enabled": listen.get("pre_record_enabled", True),
+            "beep_enabled": _env_flag("VOICE_BEEP_ENABLED", audio.get("beep_enabled", True)),
             "noise_filter_enabled": listen.get("noise_filter_enabled", True),
+            "vad_enabled": _env_flag("VOICE_VAD_ENABLED", transcription.get("vad_enabled", True)),
             "emotion_enabled": _env_flag(
                 "VOICE_EMOTION_ENABLED",
                 emotion.get("enabled", True),
@@ -100,9 +111,24 @@ def get_listen_defaults():
             "min_speech_duration": DEFAULT_MIN_SPEECH_DURATION,
             "rms_threshold": DEFAULT_RMS_THRESHOLD,
             "pre_record_enabled": True,
+            "beep_enabled": _env_flag("VOICE_BEEP_ENABLED", True),
             "noise_filter_enabled": True,
+            "vad_enabled": _env_flag("VOICE_VAD_ENABLED", True),
             "emotion_enabled": _env_flag("VOICE_EMOTION_ENABLED", True),
         }
+
+
+def _transcribe_audio(audio_path: str, vad_enabled: bool) -> str:
+    segments, _ = model.transcribe(
+        audio_path,
+        beam_size=5,
+        vad_filter=vad_enabled,
+        vad_parameters={
+            "min_silence_duration_ms": 500,
+            "speech_pad_ms": 200,
+        },
+    )
+    return " ".join(seg.text for seg in segments).strip()
 
 # ═══════════════════════════════════════════════════════════════════
 # NOISE FILTERING
@@ -336,6 +362,8 @@ class VoiceHandler(BaseHTTPRequestHandler):
         silence_timeout = silence_timeout if silence_timeout is not None else cfg["silence_timeout"]
         min_speech_duration = min_speech_duration if min_speech_duration is not None else cfg["min_speech_duration"]
         rms_threshold = rms_threshold if rms_threshold is not None else cfg["rms_threshold"]
+        beep_enabled = cfg["beep_enabled"]
+        vad_enabled = cfg["vad_enabled"]
 
         p = None
         try:
@@ -345,16 +373,17 @@ class VoiceHandler(BaseHTTPRequestHandler):
             # TRIPLE BEEP
             # ─────────────────────────────────────────────────────
             print(f"[Voice] Recording... (max {max_duration}s, silence={silence_timeout}s, rms={rms_threshold})")
-            t = np.linspace(0, BEEP_DURATION, int(SAMPLE_RATE * BEEP_DURATION), False)
-            beep_tone = (np.sin(2 * np.pi * BEEP_FREQ * t) * 16000).astype(np.int16)
-            gap = np.zeros(int(SAMPLE_RATE * BEEP_GAP), dtype=np.int16)
-            triple_beep = np.concatenate([beep_tone, gap, beep_tone, gap, beep_tone])
+            if beep_enabled:
+                t = np.linspace(0, BEEP_DURATION, int(SAMPLE_RATE * BEEP_DURATION), False)
+                beep_tone = (np.sin(2 * np.pi * BEEP_FREQ * t) * 16000).astype(np.int16)
+                gap = np.zeros(int(SAMPLE_RATE * BEEP_GAP), dtype=np.int16)
+                triple_beep = np.concatenate([beep_tone, gap, beep_tone, gap, beep_tone])
 
-            beep_stream = p.open(format=pyaudio.paInt16, channels=1, rate=SAMPLE_RATE, output=True)
-            beep_stream.write(triple_beep.tobytes())
-            beep_stream.stop_stream()
-            beep_stream.close()
-            time.sleep(0.3)  # Buffer flush
+                beep_stream = p.open(format=pyaudio.paInt16, channels=1, rate=SAMPLE_RATE, output=True)
+                beep_stream.write(triple_beep.tobytes())
+                beep_stream.stop_stream()
+                beep_stream.close()
+                time.sleep(0.3)  # Buffer flush
 
             # ─────────────────────────────────────────────────────
             # RECORDING
@@ -368,9 +397,10 @@ class VoiceHandler(BaseHTTPRequestHandler):
             all_frames = []
             has_speech = False
             silent_chunks = 0
-            max_silent_chunks = int(silence_timeout * SAMPLE_RATE / CHUNK_SIZE)
-            max_chunks = int(max_duration * SAMPLE_RATE / CHUNK_SIZE)
-            min_chunks = int(min_speech_duration * SAMPLE_RATE / CHUNK_SIZE)
+            max_silent_chunks = _seconds_to_chunks(silence_timeout)
+            max_chunks = _seconds_to_chunks(max_duration)
+            min_chunks = _seconds_to_chunks(min_speech_duration)
+            speech_start_chunk = None
 
             for i in range(max_chunks):
                 data = stream.read(CHUNK_SIZE, exception_on_overflow=False)
@@ -385,8 +415,13 @@ class VoiceHandler(BaseHTTPRequestHandler):
 
                 if rms >= rms_threshold:
                     has_speech = True
+                    if speech_start_chunk is None:
+                        speech_start_chunk = i
                     silent_chunks = 0
-                elif has_speech and i >= min_chunks:
+                elif has_speech and speech_start_chunk is not None:
+                    speech_chunks = i - speech_start_chunk + 1
+                    if speech_chunks < min_chunks:
+                        continue
                     silent_chunks += 1
                     if silent_chunks >= max_silent_chunks:
                         print("[Voice] Silence detected, stopping")
@@ -428,9 +463,8 @@ class VoiceHandler(BaseHTTPRequestHandler):
                 wf.setframerate(SAMPLE_RATE)
                 wf.writeframes(samples_array.tobytes())
             
-            print("[Voice] Transcribing with Whisper...")
-            segments, info = model.transcribe(temp_path, beam_size=5)
-            text = " ".join([seg.text for seg in segments]).strip()
+            print(f"[Voice] Transcribing with Whisper... (vad={'on' if vad_enabled else 'off'})")
+            text = _transcribe_audio(temp_path, vad_enabled=vad_enabled)
             
             os.unlink(temp_path)
             
@@ -477,8 +511,8 @@ def main():
     print("  POST /listen?timeout=30   - Record + transcribe + emotion")
     print("       &skip_emotion=true   - Skip emotion detection")
     print("       &skip_filter=true    - Skip noise filtering")
-    print("       &silence_timeout=4.0 - Silence cutoff seconds")
-    print("       &min_speech_duration=3.0 - Min speech before checking silence")
+    print("       &silence_timeout=1.5 - Silence cutoff seconds")
+    print("       &min_speech_duration=1.0 - Min speech before checking silence")
     print("       &rms_threshold=100   - Loudness floor (20-500)")
     print()
     print("Leave this window open. Claude will call /listen")
